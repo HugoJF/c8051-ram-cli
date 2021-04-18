@@ -56,10 +56,12 @@
 // Last key that was pressed
 volatile unsigned char keypress = NULL_KEY;
 
+// translate a key code to ASCII
 unsigned char key_to_ascii(unsigned char key) {
     // if numeric key
     if (key <= KEY_9) {
-        return key + 48;
+        // since KEY_0 = 0, KEY_1 = 1, KEY_n = n, offset char '0' to get the rest of ASCII codes
+        return key + '0';
     }
 
     if (key == KEY_E) {
@@ -74,6 +76,19 @@ unsigned char key_to_ascii(unsigned char key) {
     return '\0';
 }
 
+// handles printf
+void putchar(unsigned char c) {
+    SBUF0 = c;
+    while (TI0 == 0);
+    TI0 = 0;
+}
+
+// just prints a new line
+void newline(void) {
+    printf_fast_f("\n");
+}
+
+// read from virtual keyboard
 unsigned char read_keyboard(void) {
     unsigned char i, keys_2, keys_3;
 
@@ -100,7 +115,7 @@ unsigned char read_keyboard(void) {
     return NULL_KEY;
 }
 
-
+// delay execution
 void delay(unsigned int ms) {
     TMOD |= 0x01;
     TMOD &= ~0x02;
@@ -115,6 +130,7 @@ void delay(unsigned int ms) {
     }
 }
 
+// handles key presses emulation
 void int_serial(void) __interrupt 4 {
     if (RI0 == 1) {
         switch (SBUF0) {
@@ -136,6 +152,7 @@ void int_serial(void) __interrupt 4 {
     }
 }
 
+// handles key presses
 void int_keys(void) __interrupt 5 {
     static unsigned char previous_key = NULL_KEY;
     static unsigned char current_key = NULL_KEY;
@@ -155,6 +172,7 @@ void int_keys(void) __interrupt 5 {
     }
 }
 
+// read from RAM using SPI
 unsigned char read_ram(unsigned short address) {
     unsigned char address_low = address;
     unsigned char address_high = address >> 8;
@@ -177,6 +195,7 @@ unsigned char read_ram(unsigned short address) {
     return SPI0DAT; // return the data sent by the RAM
 }
 
+// write to RAM using SPI
 void write_ram(unsigned int address, unsigned short data) {
     unsigned char address_low = address;
     unsigned char address_high = address >> 8;
@@ -197,31 +216,28 @@ void write_ram(unsigned int address, unsigned short data) {
     CS = 1; // disable ram
 }
 
-// handles printf
-void putchar(unsigned char c) {
-    SBUF0 = c;
-    while (TI0 == 0);
-    TI0 = 0;
-}
-
-unsigned char read_char(void) {
+// read a single char from keypresses
+unsigned char read_char() {
     unsigned char caught;
 
     while (keypress == NULL_KEY);
 
     // use temp variable to allow this function to reset the 'keypress' flag
-    caught = keypress;
+    // convert to ascii to avoid using key defines everywhere
+    caught = key_to_ascii(keypress);
     keypress = NULL_KEY;
 
-    // convert to ascii to avoid using key defines everywhere
-    return key_to_ascii(caught);
+    // feedback to user
+    putchar(caught);
+
+    return caught;
 }
 
+// reads `len` chars and store them in `data`
 unsigned char read_string(unsigned char data[], unsigned char len) {
     unsigned char i, key;
 
     for (i = 0; i < len; ++i) {
-        // printf_fast_f("Pooling for %d\n", i);
         key = read_char();
 
         // since C and E are control characters, bail if they are read
@@ -246,58 +262,83 @@ void main(void) {
     SFRPAGE = LEGACY_PAGE;
     keypress = NULL_KEY;
 
-    printf_fast_f("TOP10\n");
-
     while (true) {
-        // read operation
-        printf_fast_f("Enter operation: %c to write, %c to read:\n", OP_WRITE, OP_READ);
+        /*
+        |-------------------------------------
+        | Reading operation
+        |-------------------------------------
+        */
+        printf_fast_f("Enter operation: %c to write, %c to read: ", OP_WRITE, OP_READ);
         operation = read_char();
+        newline();
 
         // if operation is not valid, reset loop
         if (operation != OP_WRITE && operation != OP_READ) {
-            printf_fast_f("Invalid operation, please try again!\n");
+            printf_fast_f("\nInvalid operation, please try again!\n");
             continue;
         }
 
-        printf_fast_f("Enter address: \n");
-        // tries to read an address
+        /*
+        |-------------------------------------
+        | Reading address
+        |-------------------------------------
+        */
+        printf_fast_f("Enter address: ");
         if (read_string(address, sizeof(address) - 1) == false) {
-            printf_fast_f("Failed to read address\n");
+            printf_fast_f("\nFailed to read address.\n");
             continue;
         }
+        newline();
 
-        printf_fast_f("Confirm address %s by pressing E\n", address);
         // expect E
+        printf_fast_f("Confirm address %s by pressing E: ", address);
         if (read_char() != 'e') {
-            printf_fast_f("did not receive enter\n");
+            printf_fast_f("\nFailed to confirm address\n");
             continue;
         }
+        newline();
 
-        printf_fast_f("Enter data: \n");
-        // if writing, tries to read a data value
-        if (operation == OP_WRITE && read_string(data, sizeof(data) - 1) == false) {
-            printf_fast_f("failed to read data\n");
-            continue;
-        }
-
-        printf_fast_f("Confirm data %s (%d) by pressing E\n", data, atoi (data));
-        // if writing, expect E
-        if (operation == OP_WRITE && read_char() != 'e') {
-            printf_fast_f("did not receive enter\n");
-            continue;
-        }
-
-        // run operation
+        /*
+        |-------------------------------------
+        | Reading data
+        |-------------------------------------
+        */
         if (operation == OP_WRITE) {
+            // if writing, tries to read a data value
+            printf_fast_f("Enter data: ");
+            if (read_string(data, sizeof(data) - 1) == false) {
+                printf_fast_f("\nFailed to read data\n");
+                continue;
+            }
+            newline();
+
+            // since data overflow is not fatal, just warn user
+            if (atoi(data) > 255) {
+                printf_fast_f("WARNING: data overflow (out of 0-255 range)\n");
+            }
+
+            // expect E
+            printf_fast_f("Confirm data %s (%d) by pressing E: ", data, atoi (data));
+            if (read_char() != 'e') {
+                printf_fast_f("\nFailed to confirm data.\n");
+                continue;
+            }
+            newline();
+        }
+
+        /*
+        |-------------------------------------
+        | Sending operation to RAM
+        |-------------------------------------
+        */
+        if (operation == OP_WRITE) {
+            // TODO validation of address
             printf_fast_f("Writing %s(%d) to %s\n", data, atoi(data), address);
             write_ram(atoi(address), atoi(data));
         }
 
-        if (operation == OP_READ) {
-            printf_fast_f("Read from %s: %d\n", address, read_ram(atoi(address)));
+        else if (operation == OP_READ) {
+            printf_fast_f("Read from address %s: %d\n", address, read_ram(atoi(address)));
         }
-
-        // write_ram(i, (unsigned char) i);
-        // printf_fast_f("[%d] = %d\n", i, read_ram(i));
     }
 }
