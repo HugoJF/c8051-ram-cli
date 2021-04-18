@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "config.c"
 #include "def_pinos.h"
 
@@ -8,8 +9,10 @@
 // Macros to make code more readable
 #define true 1
 #define false 0
-#define OP_WRITE 0
-#define OP_READ 1
+
+// Operations are now ASCII chars!
+#define OP_WRITE '0'
+#define OP_READ '1'
 
 // Keyboard key to uC pin
 #define KP0 P3_0
@@ -25,7 +28,7 @@
 #define KPE P2_6
 #define KPC P2_7
 
-// Keyboard key flags
+// Keyboard key flags (most of them are not used, but are defined for sake of completeness)
 #define KEY_0 0
 #define KEY_1 1
 #define KEY_2 2
@@ -67,6 +70,7 @@ unsigned char key_to_ascii(unsigned char key) {
         return 'c';
     }
 
+    // code should never reach this
     return '\0';
 }
 
@@ -200,15 +204,17 @@ void putchar(unsigned char c) {
     TI0 = 0;
 }
 
-unsigned char poll_input(void) {
+unsigned char read_char(void) {
     unsigned char caught;
 
     while (keypress == NULL_KEY);
 
+    // use temp variable to allow this function to reset the 'keypress' flag
     caught = keypress;
     keypress = NULL_KEY;
 
-    return caught;
+    // convert to ascii to avoid using key defines everywhere
+    return key_to_ascii(caught);
 }
 
 unsigned char read_string(unsigned char data[], unsigned char len) {
@@ -216,13 +222,14 @@ unsigned char read_string(unsigned char data[], unsigned char len) {
 
     for (i = 0; i < len; ++i) {
         // printf_fast_f("Pooling for %d\n", i);
-        key = poll_input();
+        key = read_char();
 
-        if (key == KEY_C || key == KEY_E) {
+        // since C and E are control characters, bail if they are read
+        if (key == 'c' || key == 'e') {
             return false;
         }
 
-        data[i] = key_to_ascii(key);
+        data[i] = key;
     }
 
     data[i] = '\0';
@@ -232,8 +239,8 @@ unsigned char read_string(unsigned char data[], unsigned char len) {
 
 void main(void) {
     unsigned char operation = 0;
-    unsigned char address[5];
-    unsigned char data[4];
+    unsigned char address[5]; // 4 chars + null termination
+    unsigned char data[4]; // 3 chars + null termination
 
     Init_Device();
     SFRPAGE = LEGACY_PAGE;
@@ -241,55 +248,53 @@ void main(void) {
 
     printf_fast_f("TOP10\n");
 
-    while (1) {
-        // clear buffer
-
+    while (true) {
         // read operation
-        operation = poll_input();
+        printf_fast_f("Enter operation: %c to write, %c to read:\n", OP_WRITE, OP_READ);
+        operation = read_char();
 
-        printf_fast_f("Enter operation\n");
         // if operation is not valid, reset loop
         if (operation != OP_WRITE && operation != OP_READ) {
-            printf_fast_f("Did not receive a valid operation key\n");
+            printf_fast_f("Invalid operation, please try again!\n");
             continue;
         }
 
-        printf_fast_f("Enter address\n");
+        printf_fast_f("Enter address: \n");
         // tries to read an address
         if (read_string(address, sizeof(address) - 1) == false) {
             printf_fast_f("Failed to read address\n");
             continue;
         }
 
-        printf_fast_f("Confirm address\n");
+        printf_fast_f("Confirm address %s by pressing E\n", address);
         // expect E
-        if (poll_input() != KEY_E) {
+        if (read_char() != 'e') {
             printf_fast_f("did not receive enter\n");
             continue;
         }
 
-        printf_fast_f("reading data\n");
+        printf_fast_f("Enter data: \n");
         // if writing, tries to read a data value
         if (operation == OP_WRITE && read_string(data, sizeof(data) - 1) == false) {
             printf_fast_f("failed to read data\n");
             continue;
         }
 
-        printf_fast_f("confirm data\n");
+        printf_fast_f("Confirm data %s (%d) by pressing E\n", data, atoi (data));
         // if writing, expect E
-        if (operation == OP_WRITE && poll_input() != KEY_E) {
+        if (operation == OP_WRITE && read_char() != 'e') {
             printf_fast_f("did not receive enter\n");
             continue;
         }
 
-        printf_fast_f("Running\n");
         // run operation
         if (operation == OP_WRITE) {
-            printf_fast_f("Writing %s to %s\n", data, address);
-        } else if (operation == OP_READ) {
-            printf_fast_f("Read from %s\n", address);
-        } else {
-            continue;
+            printf_fast_f("Writing %s(%d) to %s\n", data, atoi(data), address);
+            write_ram(atoi(address), atoi(data));
+        }
+
+        if (operation == OP_READ) {
+            printf_fast_f("Read from %s: %d\n", address, read_ram(atoi(address)));
         }
 
         // write_ram(i, (unsigned char) i);
