@@ -1,3 +1,10 @@
-# C8051 SPI RAM module 
+# C8051 SPI RAM CLI 
 
-Firmware writes to a 8192-byte RAM module via SPI and prints them to the terminal. Writes a sequential value (0 to 255) to every address, read it back and prints it using `printf_fast_f` to virtual terminal using UART.
+Firmware for a CLI for a SPI RAM chip using a virtual keyboard via serial terminal that emulates real switches with bouncing.
+
+## How it works
+
+Commands are sent through via serial terminal (provided by BIG8051 module with USB COM interface) as a series of characters which are then processed by the uC.
+
+Write commands have the following format: `0<4 char RAM address>e<3 char data>e`;
+Read commands have teh following format: `1<4 char RAM address>e`.
