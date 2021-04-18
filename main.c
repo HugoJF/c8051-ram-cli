@@ -3,7 +3,13 @@
 #include "def_pinos.h"
 
 // Virtual switch bounce emulation
-#define BOUNCE(X) X=0;delay(5);X=1;delay(5);X=0;delay(150);X=1;delay(5);X=0;delay(5);X=1;
+#define BOUNCE(X) X=0;delay(5);X=1;delay(5);X=0;delay(150);X=1;delay(5);X=0;delay(5);X=1;break;
+
+// Macros to make code more readable
+#define true 1
+#define false 0
+#define OP_WRITE 0
+#define OP_READ 1
 
 // Keyboard key to uC pin
 #define KP0 P3_0
@@ -20,18 +26,18 @@
 #define KPC P2_7
 
 // Keyboard key flags
-#define K0 0
-#define K1 1
-#define K2 2
-#define K3 3
-#define K4 4
-#define K5 5
-#define K6 6
-#define K7 7
-#define K8 8
-#define K9 9
-#define KE 10
-#define KC 11
+#define KEY_0 0
+#define KEY_1 1
+#define KEY_2 2
+#define KEY_3 3
+#define KEY_4 4
+#define KEY_5 5
+#define KEY_6 6
+#define KEY_7 7
+#define KEY_8 8
+#define KEY_9 9
+#define KEY_E 10
+#define KEY_C 11
 	
 // No keys pressed flag
 #define NULL_KEY 50
@@ -46,6 +52,23 @@
 
 // Last key that was pressed
 volatile unsigned char keypress = NULL_KEY;
+
+unsigned char key_to_ascii(unsigned char key) {
+    // if numeric key
+    if (key <= KEY_9) {
+        return key + 48;
+    }
+
+    if (key == KEY_E) {
+        return 'e';
+    }
+
+    if (key == KEY_C) {
+        return 'c';
+    }
+
+    return '\0';
+}
 
 unsigned char read_keyboard(void) {
     unsigned char i, keys_2, keys_3;
@@ -91,25 +114,25 @@ void delay(unsigned int ms) {
 void int_serial(void) __interrupt 4 {
     if (RI0 == 1) {
         switch (SBUF0) {
-            case '0': BOUNCE(KP0); break;
-            case '1': BOUNCE(KP1); break;
-            case '2': BOUNCE(KP2); break;
-            case '3': BOUNCE(KP3); break;
-            case '4': BOUNCE(KP4); break;
-            case '5': BOUNCE(KP5); break;
-            case '6': BOUNCE(KP6); break;
-            case '7': BOUNCE(KP7); break;
-            case '8': BOUNCE(KP8); break;
-            case '9': BOUNCE(KP9); break;
-            case 'e': BOUNCE(KPE); break;
-            case 'c': BOUNCE(KPC); break;
+            case '0': BOUNCE(KP0);
+            case '1': BOUNCE(KP1);
+            case '2': BOUNCE(KP2);
+            case '3': BOUNCE(KP3);
+            case '4': BOUNCE(KP4);
+            case '5': BOUNCE(KP5);
+            case '6': BOUNCE(KP6);
+            case '7': BOUNCE(KP7);
+            case '8': BOUNCE(KP8);
+            case '9': BOUNCE(KP9);
+            case 'e': BOUNCE(KPE);
+            case 'c': BOUNCE(KPC);
             default: break; 
         }
         RI0=0;
     }
 }
 
-void int_keys (void) __interrupt 5 {
+void int_keys(void) __interrupt 5 {
     static unsigned char previous_key = NULL_KEY;
     static unsigned char current_key = NULL_KEY;
 
@@ -118,7 +141,12 @@ void int_keys (void) __interrupt 5 {
     previous_key = current_key;
     current_key = read_keyboard();
 
+    // if (keypress != NULL_KEY) {
+    //     printf_fast_f("keypress: %c\n", key_to_ascii(keypress));
+    // }
+
     if (previous_key == NULL_KEY && current_key != NULL_KEY) {
+        // printf_fast_f("Received key %c\n", key_to_ascii(current_key));
         keypress = current_key;
     }
 }
@@ -166,15 +194,46 @@ void write_ram(unsigned int address, unsigned short data) {
 }
 
 // handles printf
-void putchar (unsigned char c) {
+void putchar(unsigned char c) {
     SBUF0 = c;
     while (TI0 == 0);
     TI0 = 0;
 }
 
-void main (void) {
-    unsigned int i = 0;
-    unsigned char t = 0;
+unsigned char poll_input(void) {
+    unsigned char caught;
+
+    while (keypress == NULL_KEY);
+
+    caught = keypress;
+    keypress = NULL_KEY;
+
+    return caught;
+}
+
+unsigned char read_string(unsigned char data[], unsigned char len) {
+    unsigned char i, key;
+
+    for (i = 0; i < len; ++i) {
+        // printf_fast_f("Pooling for %d\n", i);
+        key = poll_input();
+
+        if (key == KEY_C || key == KEY_E) {
+            return false;
+        }
+
+        data[i] = key_to_ascii(key);
+    }
+
+    data[i] = '\0';
+
+    return true;
+}
+
+void main(void) {
+    unsigned char operation = 0;
+    unsigned char address[5];
+    unsigned char data[4];
 
     Init_Device();
     SFRPAGE = LEGACY_PAGE;
@@ -182,26 +241,57 @@ void main (void) {
 
     printf_fast_f("TOP10\n");
 
-    while (1)
-    {
-        if (keypress == NULL_KEY) {
+    while (1) {
+        // clear buffer
+
+        // read operation
+        operation = poll_input();
+
+        printf_fast_f("Enter operation\n");
+        // if operation is not valid, reset loop
+        if (operation != OP_WRITE && operation != OP_READ) {
+            printf_fast_f("Did not receive a valid operation key\n");
             continue;
         }
 
-        // if numeric key
-        if (keypress <= K9) {
-            printf_fast_f("Numeric key: %c\n", keypress + 48);
+        printf_fast_f("Enter address\n");
+        // tries to read an address
+        if (read_string(address, sizeof(address) - 1) == false) {
+            printf_fast_f("Failed to read address\n");
+            continue;
         }
 
-        if (keypress == KE) {
-            printf_fast_f("Enter\n");
+        printf_fast_f("Confirm address\n");
+        // expect E
+        if (poll_input() != KEY_E) {
+            printf_fast_f("did not receive enter\n");
+            continue;
         }
 
-        if (keypress == KC) {
-            printf_fast_f("Clear\n");
+        printf_fast_f("reading data\n");
+        // if writing, tries to read a data value
+        if (operation == OP_WRITE && read_string(data, sizeof(data) - 1) == false) {
+            printf_fast_f("failed to read data\n");
+            continue;
         }
 
-        keypress = NULL_KEY;
+        printf_fast_f("confirm data\n");
+        // if writing, expect E
+        if (operation == OP_WRITE && poll_input() != KEY_E) {
+            printf_fast_f("did not receive enter\n");
+            continue;
+        }
+
+        printf_fast_f("Running\n");
+        // run operation
+        if (operation == OP_WRITE) {
+            printf_fast_f("Writing %s to %s\n", data, address);
+        } else if (operation == OP_READ) {
+            printf_fast_f("Read from %s\n", address);
+        } else {
+            continue;
+        }
+
         // write_ram(i, (unsigned char) i);
         // printf_fast_f("[%d] = %d\n", i, read_ram(i));
     }
